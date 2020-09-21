@@ -47,7 +47,6 @@ namespace PhotoMetadata
                              Output = current?.TryConvertToOutputMetadata()
                          };
 
-
             if (merged.Any())
             {
                 var exiftool = new ConsoleClient(context.Options.ExiftoolPath);
@@ -57,6 +56,16 @@ namespace PhotoMetadata
 
                 foreach (var item in merged)
                 {
+                    // This delay seems to allow the Ctrl-C handler to operate correctly to
+                    // close the app in a controlled way. Without it the app does not close
+                    // in a timely manner, if at all, when Ctrl-C is pressed.
+                    await Task.Delay(100, stoppingToken);
+
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
                     var inputFile = item.Info.PhotoPath;
                     var metadataFile = item.Info.FileName + ".json";
                     var outputFile = Path.Combine(context.Options.OutputPath, item.Info.RelativePath, item.Info.FileName + ".jpg");
@@ -65,19 +74,9 @@ namespace PhotoMetadata
                         ? (File.Exists(outputFile) == false || context.Options.Force)
                         : (File.Exists(outputFile) == false || item.Output != null || context.Options.Force);
 
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
-
                     if (processFile)
                     {
                         _logger.LogInformation("{FilmId},{PhotoId},'{PhotoPath}'", item.Info.FilmId, item.Info.PhotoId, item.Info.PhotoPath);
-
-                        // This delay seems to allow the Ctrl-C handler to operate correctly to
-                        // close the app in a controlled way. Without it the app does not close
-                        // in a timely manner, if at all, when Ctrl-C is pressed.
-                        await Task.Delay(100, stoppingToken);
 
                         imagemagick.ResizeAndWriteMainImage(inputFile, outputFile);
 
