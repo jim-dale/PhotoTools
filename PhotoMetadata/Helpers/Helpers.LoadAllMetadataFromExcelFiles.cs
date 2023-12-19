@@ -1,37 +1,37 @@
-﻿using System.Collections.Generic;
+﻿namespace PhotoMetadata;
+
+using System.Collections.Generic;
 using System.Linq;
 using Ganss.Excel;
 using NPOI.SS.UserModel;
+using PhotoMetadata.Models;
 
-namespace PhotoMetadata
+internal static partial class Helpers
 {
-    internal static partial class Helpers
+    public static List<InputMetadata> LoadAllMetadataFromExcelFiles(string[] inputs)
     {
-        public static List<InputMetadata> LoadAllMetadataFromExcelFiles(string[] inputs)
+        var result = new List<InputMetadata>();
+
+        foreach (var input in inputs)
         {
-            var result = new List<InputMetadata>();
+            var workbook = WorkbookFactory.Create(input);
 
-            foreach (var input in inputs)
+            var mapper = new ExcelMapper(workbook);
+
+            foreach (var sheet in workbook)
             {
-                var workbook = WorkbookFactory.Create(input);
+                var items = mapper.Fetch<InputMetadata>(sheet.SheetName);
 
-                var mapper = new ExcelMapper(workbook);
+                var filtered = from item in items
+                               where item.IsEmpty().Equals(false)
+                               select item;
 
-                foreach (var sheet in workbook)
-                {
-                    var items = mapper.Fetch<InputMetadata>(sheet.SheetName);
-
-                    var filtered = from item in items
-                                   where item.IsEmpty().Equals(false)
-                                   select item;
-
-                    result.AddRange(filtered);
-                }
-
-                workbook.Close();
+                result.AddRange(filtered);
             }
 
-            return result;
+            workbook.Close();
         }
+
+        return result;
     }
 }

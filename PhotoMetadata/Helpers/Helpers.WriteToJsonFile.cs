@@ -1,20 +1,22 @@
-﻿using System.IO;
+﻿namespace PhotoMetadata;
+
+using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
-namespace PhotoMetadata
+internal static partial class Helpers
 {
-    internal static partial class Helpers
+    private static readonly JsonSerializerOptions jsonSerializerOptions = new()
     {
-        internal static async Task WriteToJsonFile<T>(string path, T item)
-        {
-            var jsonString = JsonSerializer.Serialize(item, new JsonSerializerOptions
-            {
-                IgnoreNullValues = true,
-                WriteIndented = true
-            });
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+        WriteIndented = true
+    };
 
-            await File.WriteAllTextAsync(path, jsonString);
-        }
+    internal static async Task WriteToJsonFile<T>(string path, T item)
+    {
+        string jsonString = JsonSerializer.Serialize(item, jsonSerializerOptions);
+
+        await File.WriteAllTextAsync(path, jsonString).ConfigureAwait(false);
     }
 }

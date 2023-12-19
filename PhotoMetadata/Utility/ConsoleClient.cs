@@ -1,100 +1,100 @@
-﻿using System;
+﻿namespace PhotoMetadata.Utility;
+
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Diagnostics;
+using System.Globalization;
 
-namespace PhotoMetadata
+public class ConsoleClient
 {
-    public class ConsoleClient
+    private string command;
+    private readonly StringBuilder standardOutput = new();
+    private readonly StringBuilder standardError = new();
+
+    public string Command { get => this.command; set => this.command = Environment.ExpandEnvironmentVariables(value); }
+    public string Arguments { get; set; }
+    public int ExitCode { get; set; }
+    public string StandardOutput => this.standardOutput.ToString();
+    public string StandardError => this.standardError.ToString();
+
+    public ConsoleClient()
     {
-        private string _command;
-        private readonly StringBuilder _standardOutput = new StringBuilder();
-        private readonly StringBuilder _standardError = new StringBuilder();
+    }
 
-        public string Command { get => _command; set => _command = Environment.ExpandEnvironmentVariables(value); }
-        public string Arguments { get; set; }
-        public int ExitCode { get; set; }
-        public string StandardOutput => _standardOutput.ToString();
-        public string StandardError => _standardError.ToString();
+    public ConsoleClient(string command)
+    {
+        this.Command = command;
+    }
 
-        public ConsoleClient()
+    public void Reset()
+    {
+        this.ExitCode = 0;
+        this.standardOutput.Clear();
+        this.standardError.Clear();
+    }
+
+    public void Run(IEnumerable<string> args)
+    {
+        this.Arguments = string.Join(" ", args);
+
+        this.Run();
+    }
+
+    public void Run(params string[] args)
+    {
+        this.Arguments = string.Join(" ", args);
+
+        this.Run();
+    }
+
+    public void Run(string args)
+    {
+        this.Arguments = args;
+
+        this.Run();
+    }
+
+    public void Run()
+    {
+        this.Reset();
+
+        using Process process = new();
+        process.StartInfo.FileName = this.Command;
+        process.StartInfo.Arguments = this.Arguments;
+        process.StartInfo.RedirectStandardOutput = true;
+        process.StartInfo.RedirectStandardError = true;
+        process.StartInfo.UseShellExecute = false;
+        process.StartInfo.ErrorDialog = false;
+        process.StartInfo.CreateNoWindow = true;
+
+        process.OutputDataReceived += (sender, eventArgs) =>
         {
-        }
-
-        public ConsoleClient(string command)
-        {
-            Command = command;
-        }
-
-        public void Reset()
-        {
-            ExitCode = 0;
-            _standardOutput.Clear();
-            _standardError.Clear();
-        }
-
-        public void Run(IEnumerable<string> args)
-        {
-            Arguments = string.Join(" ", args);
-
-            Run();
-        }
-
-        public void Run(params string[] args)
-        {
-            Arguments = string.Join(" ", args);
-
-            Run();
-        }
-
-        public void Run(string args)
-        {
-            Arguments = args;
-
-            Run();
-        }
-
-        public void Run()
-        {
-            Reset();
-
-            using var process = new Process();
-            process.StartInfo.FileName = Command;
-            process.StartInfo.Arguments = Arguments;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.RedirectStandardError = true;
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.ErrorDialog = false;
-            process.StartInfo.CreateNoWindow = true;
-
-            process.OutputDataReceived += (sender, eventArgs) =>
+            if (eventArgs.Data != null)
             {
-                if (eventArgs.Data != null)
-                {
-                    _standardOutput.AppendLine(eventArgs.Data);
-                }
-            };
-            process.ErrorDataReceived += (sender, eventArgs) =>
-            {
-                if (eventArgs.Data != null)
-                {
-                    _standardError.AppendLine(eventArgs.Data);
-                }
-            };
-
-            if (process.Start() == false)
-            {
-                _standardError.AppendLine($"Error starting \"{Command}\"");
+                this.standardOutput.AppendLine(eventArgs.Data);
             }
-            else
+        };
+        process.ErrorDataReceived += (sender, eventArgs) =>
+        {
+            if (eventArgs.Data != null)
             {
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
-
-                process.WaitForExit();
-
-                ExitCode = process.ExitCode;
+                this.standardError.AppendLine(eventArgs.Data);
             }
+        };
+
+        if (process.Start() == false)
+        {
+            this.standardError.AppendLine(CultureInfo.InvariantCulture, $"Error starting \"{this.Command}\"");
+        }
+        else
+        {
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            process.WaitForExit();
+
+            this.ExitCode = process.ExitCode;
         }
     }
 }

@@ -1,3 +1,7 @@
+namespace PhotoMetadata;
+
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -5,96 +9,91 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using PhotoMetadata.Models;
+using PhotoMetadata.Utility;
 
-namespace PhotoMetadata
+public class Worker(ILogger<Worker> logger, IConfiguration configuration, IHostApplicationLifetime lifetime)
+    : BackgroundService
 {
-    public class Worker : BackgroundService
+    private readonly ILogger<Worker> logger = logger;
+    private readonly IConfiguration configuration = configuration;
+    private readonly IHostApplicationLifetime lifetime = lifetime;
+
+    [SuppressMessage("Performance", "CA1851:Possible multiple enumerations of 'IEnumerable' collection", Justification = "<Pending>")]
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        private readonly ILogger<Worker> _logger;
-        private readonly IConfiguration _configuration;
-        private readonly IHostApplicationLifetime _lifetime;
+        Context context = new();
 
-        public Worker(ILogger<Worker> logger, IConfiguration configuration, IHostApplicationLifetime lifetime)
+        this.configuration.Bind(AppOptions.Name, context.Options);
+
+        context.Items = Helpers.GetPhotoContextsFromImageFiles(context.Options.InputPath, context.Options.Includes, context.Options.Excludes);
+
+        context.CurrentEntries = Helpers.LoadAllMetadataFromExcelFiles(context.Options.ExcelFiles);
+        context.PreviousEntries = Helpers.LoadAllMetadataFromJsonFile(context.Options.MetadataStorePath);
+
+        context.Changes = Helpers.GetNewAndUpdatedMetadata(context.CurrentEntries, context.PreviousEntries);
+
+        IEnumerable<PhotoContext> merged = from item in context.Items
+                                           let current = context.CurrentEntries.SingleOrDefault(i => i.PhotoId == item.PhotoId)
+                                           let previous = context.PreviousEntries.SingleOrDefault(i => i.PhotoId == item.PhotoId)
+                                           let changed = context.Changes.SingleOrDefault(i => i.PhotoId == item.PhotoId)
+                                           select new PhotoContext
+                                           {
+                                               Info = item,
+                                               Current = current,
+                                               Previous = previous,
+                                               Changed = changed,
+                                               Output = current?.TryConvertToOutputMetadata()
+                                           };
+
+        int count = merged.Count();
+        if (count > 0)
         {
-            _logger = logger;
-            _configuration = configuration;
-            _lifetime = lifetime;
-        }
+            ConsoleClient exiftool = new(context.Options.ExiftoolPath);
+            ConsoleClient imagemagick = new(context.Options.ImageMagickPath);
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            var context = new Context();
+            this.logger.LogInformation("Number of items: {ItemCount}", count);
 
-            _configuration.Bind(AppOptions.Name, context.Options);
-
-            context.Items = Helpers.GetPhotoContextsFromImageFiles(context.Options.InputPath, context.Options.Includes, context.Options.Excludes);
-
-            context.CurrentEntries = Helpers.LoadAllMetadataFromExcelFiles(context.Options.ExcelFiles);
-            context.PreviousEntries = Helpers.LoadAllMetadataFromJsonFile(context.Options.MetadataStorePath);
-
-            context.Changes = Helpers.GetNewAndUpdatedMetadata(context.CurrentEntries, context.PreviousEntries);
-
-            var merged = from item in context.Items
-                         let current = context.CurrentEntries.SingleOrDefault(i => i.PhotoId == item.PhotoId)
-                         let previous = context.PreviousEntries.SingleOrDefault(i => i.PhotoId == item.PhotoId)
-                         let changed = context.Changes.SingleOrDefault(i => i.PhotoId == item.PhotoId)
-                         select new PhotoContext
-                         {
-                             Info = item,
-                             Current = current,
-                             Previous = previous,
-                             Changed = changed,
-                             Output = current?.TryConvertToOutputMetadata()
-                         };
-
-            if (merged.Any())
+            foreach (var item in merged)
             {
-                var exiftool = new ConsoleClient(context.Options.ExiftoolPath);
-                var imagemagick = new ConsoleClient(context.Options.ImageMagickPath);
+                // This delay seems to allow the Ctrl-C handler to operate correctly to
+                // close the app in a controlled way. Without it the app does not close
+                // in a timely manner, if at all, when Ctrl-C is pressed.
+                await Task.Delay(100, stoppingToken).ConfigureAwait(false);
 
-                _logger.LogInformation("Number of items: {ItemCount}", merged.Count());
-
-                foreach (var item in merged)
+                if (stoppingToken.IsCancellationRequested)
                 {
-                    // This delay seems to allow the Ctrl-C handler to operate correctly to
-                    // close the app in a controlled way. Without it the app does not close
-                    // in a timely manner, if at all, when Ctrl-C is pressed.
-                    await Task.Delay(100, stoppingToken);
+                    break;
+                }
 
-                    if (stoppingToken.IsCancellationRequested)
+                var inputFile = item.Info.PhotoPath;
+                var metadataFile = item.Info.FileName + ".json";
+                var outputFile = Path.Combine(context.Options.OutputPath, item.Info.RelativePath, item.Info.FileName + ".jpg");
+
+                bool processFile = (context.Options.Initialise)
+                    ? (File.Exists(outputFile) == false || context.Options.Force)
+                    : (File.Exists(outputFile) == false || item.Output != null || context.Options.Force);
+
+                if (processFile)
+                {
+                    this.logger.LogInformation("{FilmId},{PhotoId},'{PhotoPath}'", item.Info.FilmId, item.Info.PhotoId, item.Info.PhotoPath);
+
+                    imagemagick.ResizeAndWriteMainImage(inputFile, outputFile);
+
+                    if (item.Output != null && File.Exists(outputFile))
                     {
-                        break;
-                    }
+                        await Helpers.WriteToJsonFile(metadataFile, item.Output).ConfigureAwait(false);
 
-                    var inputFile = item.Info.PhotoPath;
-                    var metadataFile = item.Info.FileName + ".json";
-                    var outputFile = Path.Combine(context.Options.OutputPath, item.Info.RelativePath, item.Info.FileName + ".jpg");
-
-                    bool processFile = (context.Options.Initialise) 
-                        ? (File.Exists(outputFile) == false || context.Options.Force)
-                        : (File.Exists(outputFile) == false || item.Output != null || context.Options.Force);
-
-                    if (processFile)
-                    {
-                        _logger.LogInformation("{FilmId},{PhotoId},'{PhotoPath}'", item.Info.FilmId, item.Info.PhotoId, item.Info.PhotoPath);
-
-                        imagemagick.ResizeAndWriteMainImage(inputFile, outputFile);
-
-                        if (item.Output != null && File.Exists(outputFile))
-                        {
-                            await Helpers.WriteToJsonFile(metadataFile, item.Output);
-
-                            exiftool.AddPhotoMetadata(outputFile, metadataFile);
-                        }
+                        exiftool.AddPhotoMetadata(outputFile, metadataFile);
                     }
                 }
             }
-            if (stoppingToken.IsCancellationRequested == false)
-            {
-                await Helpers.WriteToJsonFile(context.Options.MetadataStorePath, context.CurrentEntries);
-            }
-
-            _lifetime.StopApplication();
         }
+        if (stoppingToken.IsCancellationRequested == false)
+        {
+            await Helpers.WriteToJsonFile(context.Options.MetadataStorePath, context.CurrentEntries).ConfigureAwait(false);
+        }
+
+        this.lifetime.StopApplication();
     }
 }

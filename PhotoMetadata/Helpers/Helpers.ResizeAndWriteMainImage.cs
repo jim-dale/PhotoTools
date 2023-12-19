@@ -1,41 +1,40 @@
-﻿using System;
+﻿namespace PhotoMetadata;
+
+using System;
 using ImageMagick;
 
-namespace PhotoMetadata
+internal static partial class Helpers
 {
-    internal static partial class Helpers
+    [Obsolete]
+    public static void ResizeAndWriteMainImage(string input, string output)
     {
-        [Obsolete]
-        public static void ResizeAndWriteMainImage(string input, string output)
-        {
-            var geometry = new MagickGeometry("@1500000");
+        var geometry = new MagickGeometry("@1500000");
 
-            using var collection = new MagickImageCollection(input);
-            int maxWidth = 0;
-            int index = int.MinValue;
-            for (int i = 0; i < collection.Count; i++)
-            { 
-                if (collection[i].Width > maxWidth)
-                {
-                    maxWidth = collection[i].Width;
-                    index = i;
-                }
-            }
-
-            if (index > int.MinValue)
+        using var collection = new MagickImageCollection(input);
+        int maxWidth = 0;
+        int index = int.MinValue;
+        for (int i = 0; i < collection.Count; i++)
+        { 
+            if (collection[i].Width > maxWidth)
             {
-                var image = collection[index];
+                maxWidth = collection[i].Width;
+                index = i;
+            }
+        }
 
-                if (image != null)
-                {
-                    image.FilterType = FilterType.Quadratic;
-                    image.Resize(geometry);
+        if (index > int.MinValue)
+        {
+            var image = collection[index];
 
-                    image.Format = MagickFormat.Jpeg;
-                    image.Quality = 85;
+            if (image != null)
+            {
+                image.FilterType = FilterType.Quadratic;
+                image.Resize(geometry);
 
-                    image.Write(output);
-                }
+                image.Format = MagickFormat.Jpeg;
+                image.Quality = 85;
+
+                image.Write(output);
             }
         }
     }
